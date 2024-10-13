@@ -1,0 +1,15 @@
+services:
+  tg-bot:
+    build:
+      context: .
+      dockerfile: ./dev.Dockerfile
+    container_name: tg-bot
+    restart: unless-stopped
+    ports:
+      - '${TELEGRAM_BOT_PORT}:${TELEGRAM_BOT_PORT}'
+    networks:
+      - shared_network
+
+networks:
+  shared_network:
+    external: true

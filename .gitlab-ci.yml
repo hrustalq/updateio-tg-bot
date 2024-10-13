@@ -1,0 +1,21 @@
+stages:
+  - deploy
+
+deploy:
+  stage: deploy
+  tags:
+    - docker+machine
+  script:
+    - |
+      ENV_VARS=$(env | awk -F = '{print "-e "$1}' | grep -E '^-e (TELEGRAM_BOT_|CORS_|THROTTLER_|API_)' | tr '\n' ' ')
+    - docker build -t tg-bot:$CI_COMMIT_SHA -t tg-bot:latest .
+    - docker stop tg-bot || true
+    - docker rm tg-bot || true
+    - |
+      docker run -d --name tg-bot \
+        --network shared_network \
+        -p 3002:3002 \
+        $ENV_VARS \
+        tg-bot:latest
+  only:
+    - main
