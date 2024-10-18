@@ -12,7 +12,7 @@ import { UpdatesModule } from 'src/updates/updates.module';
         baseURL: configService.getOrThrow('API_URL'),
         headers: {
           'Content-Type': 'application/json',
-          Authorization: `Bearer ${configService.getOrThrow('API_KEY')}`,
+          Authorization: `apiKey ${configService.getOrThrow('API_KEY')}`,
         },
       }),
       inject: [ConfigService],

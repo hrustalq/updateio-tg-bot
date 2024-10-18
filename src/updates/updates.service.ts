@@ -16,8 +16,8 @@ export class UpdatesService {
     private readonly configService: ConfigService,
   ) {
     this.apiUrl = this.configService.get<string>('API_URL');
-    this.apiKey = this.configService.getOrThrow<string>('API_KEY')
-    this.httpService.axiosRef.defaults.headers.Authorization = `Bearer ${this.apiKey}`
+    this.apiKey = this.configService.getOrThrow<string>('API_KEY');
+    this.httpService.axiosRef.defaults.headers.Authorization = `apiKey ${this.apiKey}`;
   }
 
   async handleUpdateButtonClick(
@@ -47,33 +47,36 @@ export class UpdatesService {
     }
   }
 
-  private async requestUpdate(gameId: string, appId: string, userId: string): Promise<string> {
+  private async requestUpdate(
+    gameId: string,
+    appId: string,
+    userId: string,
+  ): Promise<string> {
     try {
       const response = await firstValueFrom(
         this.httpService.post(`${this.apiUrl}/updates/request_system`, {
           gameId,
           appId,
           userId,
-        }, 
-        {
-          headers: {
-            'apiKey': this.apiKey,
-          }
-        }
-        )
+        }),
       );
       return response.data.id;
     } catch (error) {
-      console.error({ error })
+      console.error({ error });
       this.logger.error('Error requesting update:', error);
       throw error;
     }
   }
 
-  private async getUpdateCommand(appId: string, gameId: string): Promise<string> {
+  private async getUpdateCommand(
+    appId: string,
+    gameId: string,
+  ): Promise<string> {
     try {
       const response = await firstValueFrom(
-        this.httpService.get(`${this.apiUrl}/settings/?appId=${appId}&gameId=${gameId}`)
+        this.httpService.get(
+          `${this.apiUrl}/settings/?appId=${appId}&gameId=${gameId}`,
+        ),
       );
       return response.data.data[0].updateCommand;
     } catch (error) {
