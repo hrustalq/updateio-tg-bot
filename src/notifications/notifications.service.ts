@@ -168,7 +168,7 @@ ${news.content}
     try {
       for (const userId of data.recipients) {
         const message = this.createPatchNoteMessage(data);
-        const callbackData = `pn_${data.patchNoteId}_${data.game.name}_${data.app.name}`;
+        const callbackData = `pn_${data.game.id}_${data.app.id}`;
         await this.telegramBotService.sendMessageWithUpdateButton(
           userId,
           message,
@@ -217,5 +217,52 @@ ${news.content}
     } catch (error) {
       this.logger.error('Error handling update button click:', error);
     }
+  }
+
+  @RabbitSubscribe({
+    exchange: 'notifications',
+    routingKey: 'update.status',
+    queue: 'update-status-queue',
+  })
+  async handleUpdateStatus(data: {
+    userId: string;
+    gameId: string;
+    appId: string;
+    status: string;
+    message: string;
+  }) {
+    this.logger.log(
+      `Received update status for user ${data.userId}, game ${data.gameId}, app ${data.appId}`,
+    );
+    try {
+      const message = this.createUpdateStatusMessage(data);
+      
+      // Получаем чат с пользователем
+      const chat = await this.telegramBotService.getChatWithUser(Number(data.userId));
+      
+      // Отправляем сообщение, используя ID чата
+      await this.telegramBotService.sendMessageToUser(chat.id, message, 'Markdown');
+      
+      this.logger.log(`Update status notification sent to user ${data.userId}`);
+    } catch (error) {
+      this.logger.error('Error handling update status notification:', error);
+    }
+  }
+
+  private createUpdateStatusMessage(data: {
+    gameId: string;
+    appId: string;
+    status: string;
+    message: string;
+  }): string {
+    return `
+🔄 *Статус обновления*
+
+🎮 *Игра:* ${data.gameId}
+📱 *Приложение:* ${data.appId}
+📊 *Статус:* ${data.status}
+
+${data.message}
+  `;
   }
 }

@@ -164,21 +164,6 @@ export class TelegramBotUpdate {
     );
   }
 
-  @On('callback_query')
-  async onCallbackQuery(
-    @TelegramUser() user: User,
-    @Ctx() ctx: Context,
-  ): Promise<void> {
-    const callbackQuery = ctx.callbackQuery;
-    if (!callbackQuery) {
-      return;
-    }
-
-    if ('game_short_name' in callbackQuery) {
-      await ctx.answerCbQuery('Получен игровой callback.');
-    }
-  }
-
   @On('text')
   onMessage(
     @TelegramUser() user: User,
@@ -195,57 +180,39 @@ export class TelegramBotUpdate {
       ctx.callbackQuery.message &&
       'text' in ctx.callbackQuery.message
     ) {
-      const [, patchNoteId, gameName, appName] =
-        ctx.callbackQuery.data.split('_');
-
-      // Сохраняем данные в сессии
-      ctx.session.updateData = { patchNoteId, gameName, appName };
-
-      await ctx.answerCbQuery('Запрос на обновление отправлен');
-
-      // Получаем оригинальный текст сообщения
-      const originalMessage = ctx.callbackQuery.message.text;
-
-      // Добавляем сноску о запуске обновления и кнопку подтверждения
-      const updatedMessage = `${originalMessage}\n\n_Запрос на обновление отправлен ${new Date().toLocaleString()}_`;
-
-      const confirmKeyboard = Markup.inlineKeyboard([
-        Markup.button.callback('Подтвердить обновление', 'confirm_update'),
-      ]);
-
-      // Редактируем сообщение, меняя кнопку и добавляя сноску
-      await ctx.editMessageText(updatedMessage, {
-        parse_mode: 'Markdown',
-        ...confirmKeyboard,
-      });
-    } else {
-      this.logger.warn('Некорректный формат callback query или сообщения');
-    }
-  }
-
-  @Action('confirm_update')
-  async onConfirmUpdate(@Ctx() ctx: Context) {
-    const updateData = ctx.session.updateData;
-    if (updateData) {
-      const { gameName, appName } = updateData;
+      const [, gameId, appId] = ctx.callbackQuery.data.split('_');
       const userId = ctx.from.id.toString();
 
-      await this.updatesService.handleUpdateButtonClick(
-        userId,
-        gameName,
-        appName,
-      );
+      try {
+        await this.updatesService.handleUpdateButtonClick(
+          userId,
+          gameId,
+          appId,
+        );
 
-      // Очищаем данные из сессии
-      delete ctx.session.updateData;
+        await ctx.answerCbQuery('Запрос на обновление отправлен');
 
-      await ctx.answerCbQuery('Обновление подтверждено и запущено');
+        // Получаем оригинальный текст сообщения
+        const originalMessage = ctx.callbackQuery.message.text;
 
-      // Обновляем сообщение, убирая кнопку подтверждения
-      const updatedMessage = `${ctx.callbackQuery.message.message_id}\n\n_Обновление подтверждено и запущено ${new Date().toLocaleString()}_`;
-      await ctx.editMessageText(updatedMessage, { parse_mode: 'Markdown' });
+        // Добавляем сноску о запуске обновления
+        const updatedMessage = `${originalMessage}\n\n_Запрос на обновление отправлен ${new Date().toLocaleString()}_`;
+
+        // Редактируем сообщение, убирая кнопку
+        await ctx.editMessageText(updatedMessage, { parse_mode: 'Markdown' });
+      } catch (error) {
+        this.logger.error('Ошибка при обработке запроса на обновление:', error);
+        await ctx.answerCbQuery('Произошла ошибка при запросе обновления. Пожалуйста, попробуйте позже.');
+        
+        // Оставляем кнопку и добавляем сообщение об ошибке
+        const errorMessage = `${ctx.callbackQuery.message.text}\n\n_Ошибка: Не удалось запросить обновление. Пожалуйста, попробуйте позже._`;
+        await ctx.editMessageText(errorMessage, {
+          parse_mode: 'Markdown',
+          reply_markup: ctx.callbackQuery.message.reply_markup,
+        });
+      }
     } else {
-      await ctx.answerCbQuery('Ошибка: данные об обновлении не найдены');
+      this.logger.warn('Некорректный формат callback query или сообщения');
     }
   }
 }
