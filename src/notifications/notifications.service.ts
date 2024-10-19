@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { TelegramBotService } from 'src/telegram-bot/telegram-bot.service';
-import { RabbitSubscribe, AmqpConnection } from '@golevelup/nestjs-rabbitmq';
+import { RabbitSubscribe } from '@golevelup/nestjs-rabbitmq';
+import { createId } from '@paralleldrive/cuid2';
 
 @Injectable()
 export class NotificationsService {
@@ -8,7 +9,6 @@ export class NotificationsService {
 
   constructor(
     private readonly telegramBotService: TelegramBotService,
-    private readonly amqpConnection: AmqpConnection,
   ) {}
 
   @RabbitSubscribe({
@@ -117,7 +117,7 @@ ${
   }) {
     try {
       const message = this.formatUpdateMessage(dto);
-      // Используем более короткий идентификатор для callback_data
+      // Используем более корокий идентификатор для callback_data
       const callbackData = `vu_${dto.newsId.slice(0, 16)}`;
       await this.telegramBotService.sendMessageWithUpdateButton(
         dto.userId,
@@ -160,7 +160,6 @@ ${news.content}
     app: { id: string; name: string };
     game: { id: string; name: string };
     recipients: string[];
-    patchNoteId: string;
   }) {
     this.logger.log(
       `Received patch note notification for game ${data.game.name}`,
@@ -168,13 +167,27 @@ ${news.content}
     try {
       for (const userId of data.recipients) {
         const message = this.createPatchNoteMessage(data);
-        const callbackData = `pn_${data.game.id}_${data.app.id}`;
-        await this.telegramBotService.sendMessageWithUpdateButton(
-          userId,
+        const updateId = createId();
+        const callbackData = `p_${updateId}`;
+        const chat = await this.telegramBotService.getChatWithUser(Number(userId));
+        const messageId = await this.telegramBotService.sendMessageWithUpdateButton(
+          chat.id,
           message,
           callbackData,
           'Markdown',
         );
+        // Сохраняем контекст обновления
+        await this.telegramBotService.saveUpdateContext(updateId, {
+          userId: userId,
+          chatId: chat.id,
+          gameId: data.game.id,
+          appId: data.app.id,
+          gameName: data.game.name,
+          appName: data.app.name,
+          messageId: messageId,
+          status: 'PENDING',
+          originalMessage: message,
+        });
       }
       this.logger.log(
         `Patch note notifications sent to ${data.recipients.length} users`,
@@ -187,82 +200,73 @@ ${news.content}
   private createPatchNoteMessage(data: {
     app: { id: string; name: string };
     game: { id: string; name: string };
-    patchNoteId: string;
   }): string {
     return `
-🎮 *Новое обновление для игры ${data.game.name}*
+🎮 *Обновление для игры ${data.game.name}*
 📱 *Приложение: ${data.app.name}*
 
-Доступно новое обновление для игры *${data.game.name}* в приложении *${data.app.name}*.
+Доступно обновление для игры *${data.game.name}* в приложении *${data.app.name}*.
 
 Нажмите кнопку "Обновить" ниже, чтобы запустить процесс обновления на вашем устройстве.
     `;
   }
 
-  async handleUpdateButtonClick(
-    userId: string,
-    gameName: string,
-    appName: string,
-  ): Promise<void> {
-    try {
-      await this.amqpConnection.publish('updates', 'update.requested', {
-        userId,
-        game: { name: gameName },
-        app: { name: appName },
-      });
-
-      this.logger.log(
-        `Update request sent for user ${userId}, game ${gameName}, app ${appName}`,
-      );
-    } catch (error) {
-      this.logger.error('Error handling update button click:', error);
-    }
-  }
-
   @RabbitSubscribe({
-    exchange: 'notifications',
+    exchange: 'updates',
     routingKey: 'update.status',
     queue: 'update-status-queue',
   })
   async handleUpdateStatus(data: {
+    id: string;
     userId: string;
     gameId: string;
     appId: string;
     status: string;
-    message: string;
+    message?: string;
   }) {
     this.logger.log(
-      `Received update status for user ${data.userId}, game ${data.gameId}, app ${data.appId}`,
+      `Received update status for user ${data.userId}, game ${data.gameId}, app ${data.appId}, status: ${data.status}, id: ${data.id}`,
     );
     try {
-      const message = this.createUpdateStatusMessage(data);
+      const updateContext = await this.telegramBotService.getUpdateContext(data.id);
+      if (!updateContext) {
+        this.logger.warn(`No context found for update ${data.id}`);
+        return;
+      }
+
+      const originalMessage = updateContext.originalMessage || '';
+      const statusMessage = this.createUpdateStatusMessage(data.status, data.message);
+      const updatedMessage = `${originalMessage}\n\n${statusMessage}`;
       
-      // Получаем чат с пользователем
-      const chat = await this.telegramBotService.getChatWithUser(Number(data.userId));
+      await this.telegramBotService.editOrSendUpdateStatusMessage(
+        data.id, 
+        updatedMessage, 
+        'Markdown'
+      );
       
-      // Отправляем сообщение, используя ID чата
-      await this.telegramBotService.sendMessageToUser(chat.id, message, 'Markdown');
-      
-      this.logger.log(`Update status notification sent to user ${data.userId}`);
+      this.logger.log(`Update status notification processed for user ${data.userId}, id: ${data.id}`);
     } catch (error) {
-      this.logger.error('Error handling update status notification:', error);
+      this.logger.error(`Error handling update status notification for id ${data.id}:`, error);
     }
   }
 
-  private createUpdateStatusMessage(data: {
-    gameId: string;
-    appId: string;
-    status: string;
-    message: string;
-  }): string {
-    return `
-🔄 *Статус обновления*
+  private createUpdateStatusMessage(status: string, message?: string): string {
+    const statusMap = {
+      PENDING: '⏳ Ожидание',
+      PROCESSING: '🔄 Обработка',
+      COMPLETED: '✅ Завершено',
+      FAILED: '❌ Ошибка',
+    };
 
-🎮 *Игра:* ${data.gameId}
-📱 *Приложение:* ${data.appId}
-📊 *Статус:* ${data.status}
+    const statusText = statusMap[status as keyof typeof statusMap] || status;
+    const currentDate = new Date().toLocaleString('ru-RU', { timeZone: 'Europe/Moscow' });
 
-${data.message}
-  `;
+    let statusMessage = `\n*🔎 Статус обновления:* ${statusText}`;
+    if (message) {
+      statusMessage += `\n💬 *Сообщение:* ${message}`;
+    }
+    statusMessage += `\n🕒 *Дата (МСК +3):* ${currentDate}`;
+
+    return statusMessage.trim();
   }
 }

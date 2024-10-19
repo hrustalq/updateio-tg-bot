@@ -65,7 +65,7 @@ export class TelegramBotUpdate {
 
 Вот что я могу для вас сделать:
 
-🔔 /subscribe - Подписаться на обновления игры
+🔔 /subscribe - Подписаться на обновления и
 🔕 /unsubscribe - Отписаться от обновлений игры
 📋 /list - Показать список ваших подписок
 🧹 /clear_history - Очистить историю чата
@@ -90,7 +90,7 @@ export class TelegramBotUpdate {
 🧹 /clear_history - Очистить историю чата
    Удалите предыдущие сообщения для конфиденциальности
 
-Если у вас есть вопросы или нужна дополнительная помощь, не стесняйтесь спрашивать!`;
+сли у вас есть вопросы или нужна дополнительная помощь, не стесняйтесь прашивать!`;
   }
 
   @Command('admin')
@@ -108,7 +108,7 @@ export class TelegramBotUpdate {
     const miniAppUrl = 'https://mini-app.updateio.dev';
 
     const keyboard = Markup.inlineKeyboard([
-      Markup.button.webApp('Открыть подписки', miniAppUrl),
+      Markup.button.webApp('Открыть подпски', miniAppUrl),
     ]);
 
     await ctx.reply(
@@ -129,7 +129,7 @@ export class TelegramBotUpdate {
     ]);
 
     await ctx.reply(
-      'Нажмите кнопку ниже, чтобы открыть мини-приложение для того, чтобы отписаться:',
+      'Нажмите кнопку ниже, чтобы открыть мини-приложение для того, чтобы отписатся:',
       keyboard,
     );
   }
@@ -172,7 +172,7 @@ export class TelegramBotUpdate {
     console.log(`Сообщение от ${user.first_name}:`, message.chat);
   }
 
-  @Action(/^pn_/)
+  @Action(/^p_/)
   async onUpdateButtonClick(@Ctx() ctx: Context) {
     if (
       'data' in ctx.callbackQuery &&
@@ -180,31 +180,45 @@ export class TelegramBotUpdate {
       ctx.callbackQuery.message &&
       'text' in ctx.callbackQuery.message
     ) {
-      const [, gameId, appId] = ctx.callbackQuery.data.split('_');
-      const userId = ctx.from.id.toString();
+      const [, updateId] = ctx.callbackQuery.data.split('_');
+      const updateContext = await this.telegramBotService.getUpdateContext(updateId);
+
+      if (!updateContext) {
+        this.logger.warn(`No context found for update ${updateId}`);
+        await ctx.answerCbQuery('Произошла ошибка. Пожалуйста, попробуйте позже.');
+        return;
+      }
+
+      const { userId, gameId, appId } = updateContext;
 
       try {
         await this.updatesService.handleUpdateButtonClick(
           userId,
           gameId,
           appId,
+          updateId
         );
 
         await ctx.answerCbQuery('Запрос на обновление отправлен');
 
-        // Получаем оригинальный текст сообщения
         const originalMessage = ctx.callbackQuery.message.text;
+        const updatedMessage = `${originalMessage}\n\n_Запрос на обновление отправлен ${new Date().toLocaleString('ru-RU', { timeZone: 'Europe/Moscow' })} (МСК +3)_`;
 
-        // Добавляем сноску о запуске обновления
-        const updatedMessage = `${originalMessage}\n\n_Запрос на обновление отправлен ${new Date().toLocaleString()}_`;
+        const editedMessage = await ctx.editMessageText(updatedMessage, { 
+          parse_mode: 'Markdown',
+          reply_markup: { inline_keyboard: [] },
+        });
 
-        // Редактируем сообщение, убирая кнопку
-        await ctx.editMessageText(updatedMessage, { parse_mode: 'Markdown' });
+        if (typeof editedMessage !== 'boolean' && 'message_id' in editedMessage) {
+          await this.telegramBotService.updateStatus(updateId, 'PROCESSING');
+          this.logger.log(`Updated status for update ${updateId} to PROCESSING`);
+        } else {
+          this.logger.warn(`Failed to get message_id for update ${updateId}`);
+        }
       } catch (error) {
         this.logger.error('Ошибка при обработке запроса на обновление:', error);
         await ctx.answerCbQuery('Произошла ошибка при запросе обновления. Пожалуйста, попробуйте позже.');
         
-        // Оставляем кнопку и добавляем сообщение об ошибке
         const errorMessage = `${ctx.callbackQuery.message.text}\n\n_Ошибка: Не удалось запросить обновление. Пожалуйста, попробуйте позже._`;
         await ctx.editMessageText(errorMessage, {
           parse_mode: 'Markdown',

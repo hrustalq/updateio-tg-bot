@@ -24,9 +24,9 @@ export class UpdatesService {
     userId: string,
     gameId: string,
     appId: string,
+    updateId: string,
   ): Promise<void> {
     try {
-      const updateId = await this.requestUpdate(gameId, appId, userId);
       const updateCommand = await this.getUpdateCommand(appId, gameId);
 
       await this.amqpConnection.publish('updates', 'update.requested', {
@@ -34,7 +34,7 @@ export class UpdatesService {
         appId,
         gameId,
         userId,
-        source: 'API',
+        source: 'Telegram',
         updateCommand,
       });
 
@@ -47,27 +47,6 @@ export class UpdatesService {
     }
   }
 
-  private async requestUpdate(
-    gameId: string,
-    appId: string,
-    userId: string,
-  ): Promise<string> {
-    try {
-      const response = await firstValueFrom(
-        this.httpService.post(`${this.apiUrl}/updates/request_system`, {
-          gameId,
-          appId,
-          userId,
-        }),
-      );
-      return response.data.id;
-    } catch (error) {
-      console.error({ error });
-      this.logger.error('Error requesting update:', error);
-      throw error;
-    }
-  }
-
   private async getUpdateCommand(
     appId: string,
     gameId: string,
@@ -75,7 +54,15 @@ export class UpdatesService {
     try {
       const response = await firstValueFrom(
         this.httpService.get(
-          `${this.apiUrl}/settings/?appId=${appId}&gameId=${gameId}`,
+          `${this.apiUrl}/settings`,
+          {
+            params: {
+              appId,
+              gameId,
+              page: 1,
+              limit: 100
+            }
+          }
         ),
       );
       return response.data.data[0].updateCommand;

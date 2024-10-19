@@ -23,6 +23,7 @@
     "@nestjs/platform-express": "^10.0.0",
     "@nestjs/swagger": "^7.4.2",
     "@nestjs/throttler": "^6.2.1",
+    "@paralleldrive/cuid2": "^2.2.2",
     "@telegraf/session": "^2.0.0-beta.7",
     "axios": "^1.7.7",
     "class-transformer": "^0.5.1",
